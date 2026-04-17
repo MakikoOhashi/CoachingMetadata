@@ -14,9 +14,12 @@ const elements = {
   reflectionForm: document.getElementById("reflectionForm"),
   reflectionLabel: document.getElementById("reflectionLabel"),
   reflectionInput: document.getElementById("reflectionInput"),
+  startSessionButton: document.getElementById("startSessionButton"),
+  nextSessionButton: document.getElementById("nextSessionButton"),
 };
 
 let currentApiQuestion = null;
+let currentSessionQuestion = null;
 let sessionState = {
   step: "idle",
   availableTime: null,
@@ -24,6 +27,8 @@ let sessionState = {
   branchIndex: 0,
   branchAnswers: [],
   wholeAnswer: null,
+  wholeSubmitting: false,
+  selectedWholeChoice: null,
 };
 let derivedState = {
   riskLevel: "medium",
@@ -79,7 +84,8 @@ function setSessionModeBadge(text) {
 }
 
 function updateSessionTopic() {
-  document.getElementById("sessionTopic").textContent = currentApiQuestion?.subject || "問題を読み込むと表示されます";
+  document.getElementById("sessionTopic").textContent =
+    currentApiQuestion?.subject || currentSessionQuestion?.stem || "問題を読み込むと表示されます";
 }
 
 async function postApi(path, body) {
@@ -118,6 +124,7 @@ function renderStudentState(payload) {
 
 function renderQuestionFromApi(question) {
   currentApiQuestion = question;
+  currentSessionQuestion = normalizeQuestionForSession(question);
   sessionState = {
     step: "idle",
     availableTime: null,
@@ -125,18 +132,23 @@ function renderQuestionFromApi(question) {
     branchIndex: 0,
     branchAnswers: [],
     wholeAnswer: null,
+    wholeSubmitting: false,
+    selectedWholeChoice: null,
   };
   if (question?.stem) {
     derivedState.stem = question.stem;
   }
-  derivedState.correctOptionIndex = getCorrectOptionIndexFromQuestion(question);
-  const choices = Array.isArray(question?.choices) ? question.choices : [];
+  derivedState.correctOptionIndex = currentSessionQuestion.correctOptionIndex;
+  const choices = Array.isArray(currentSessionQuestion?.branches) ? currentSessionQuestion.branches : [];
   if (choices.length > 0) {
     derivedState.selectedOptionIndex = 1;
   }
   appendLog("question-answer-key", {
     questionId: question?.id || null,
     correctOptionIndex: derivedState.correctOptionIndex,
+    mode: currentSessionQuestion.mode,
+    isBranchModeSupported: currentSessionQuestion.isBranchModeSupported,
+    unsupportedReason: currentSessionQuestion.unsupportedReason,
   });
   renderSession();
 }
@@ -193,11 +205,14 @@ async function submitSelectedAnswerToApi() {
       questionMode: config.questionMode,
     });
     renderStudentState(payload);
+    sessionState.wholeSubmitting = false;
     sessionState.step = "whole_feedback";
     renderSession(payload.result);
     setApiStatus("回答を送信しました。");
   } catch (error) {
+    sessionState.wholeSubmitting = false;
     setApiStatus(error instanceof Error ? error.message : "回答送信に失敗しました。", true);
+    renderSession();
   }
 }
 
@@ -218,8 +233,17 @@ function renderSession(resultPayload = null) {
   toggleElement("wholeActionRow", true);
   toggleElement("nextSessionButton", true);
   toggleElement("reflectionForm", true);
+  elements.startSessionButton.disabled = !currentApiQuestion || sessionState.step !== "idle";
+  elements.nextSessionButton.textContent =
+    sessionState.step === "branch_feedback" && sessionState.branchIndex >= currentSessionQuestion?.branches.length - 1
+      ? "本問へ進む"
+      : "次へ進む";
+  document.querySelectorAll(".whole-answer-button").forEach((button) => {
+    button.disabled = sessionState.step !== "whole_question" || sessionState.wholeSubmitting;
+    button.dataset.selected = String(Number(button.dataset.choice) === Number(sessionState.selectedWholeChoice));
+  });
 
-  if (!currentApiQuestion) {
+  if (!currentApiQuestion || !currentSessionQuestion) {
     setSessionStepLabel("Step 0 / 5");
     setSessionModeBadge("未開始");
     setCoachMessage("まずは common-ai-api から問題を読み込みます。読み込めたら、時間を決めて1肢ずつ進めましょう。");
@@ -245,7 +269,7 @@ function renderSession(resultPayload = null) {
   }
 
   if (sessionState.step === "branch_question") {
-    const currentChoice = currentApiQuestion.choices[sessionState.branchIndex];
+    const currentBranch = currentSessionQuestion.branches[sessionState.branchIndex];
     const plan = sessionState.plan || buildSessionPlanText();
     setSessionStepLabel(`Step 3 / 5`);
     setSessionModeBadge("branch_review");
@@ -257,7 +281,7 @@ function renderSession(resultPayload = null) {
     setSessionCard(
       `Choice ${sessionState.branchIndex + 1}`,
       "この記述は正しいと思いますか？",
-      `${sessionState.branchIndex + 1}. ${currentChoice}`,
+      `${sessionState.branchIndex + 1}. ${currentBranch?.text || ""}`,
     );
     toggleElement("branchActionRow", false);
     return;
@@ -283,10 +307,10 @@ function renderSession(resultPayload = null) {
       title,
       [
         "今の問題",
-        currentApiQuestion.stem,
+        currentSessionQuestion.stem,
         "",
         "今ここ",
-        `${latest.index + 1}. ${currentApiQuestion.choices[latest.index] || ""}`,
+        `${latest.index + 1}. ${currentSessionQuestion.branches[latest.index]?.text || ""}`,
         "",
         `あなたの判断: ${formatBranchAnswer(latest.answer)}`,
         branchTruth.isKnown ? `この肢の正誤: ${branchTruth.actualTruthLabel}` : "この肢の正誤: 判定情報なし",
@@ -307,8 +331,18 @@ function renderSession(resultPayload = null) {
   if (sessionState.step === "whole_question") {
     setSessionStepLabel("Step 4 / 5");
     setSessionModeBadge("whole_question");
-    setCoachMessage("4肢を見終わったので、本問形式でまとめます。正しいものを1つ選んでください。");
-    setSessionCard("Whole Question", currentApiQuestion.stem, currentApiQuestion.choices.map((choice, index) => `${index + 1}. ${choice}`).join("\n"));
+    setCoachMessage(
+      sessionState.wholeSubmitting
+        ? "回答を送信中です。少しだけお待ちください。"
+        : currentSessionQuestion.isBranchModeSupported
+        ? "4肢を見終わったので、本問形式でまとめます。正しいものを1つ選んでください。"
+        : "この問題は1肢ずつの正誤判定に未対応です。本問形式で確認します。",
+    );
+    setSessionCard(
+      "Whole Question",
+      currentSessionQuestion.stem,
+      currentSessionQuestion.branches.map((branch, index) => `${index + 1}. ${branch.text}`).join("\n"),
+    );
     toggleElement("wholeActionRow", false);
     return;
   }
@@ -336,9 +370,16 @@ function renderSession(resultPayload = null) {
 }
 
 function startSession() {
-  if (!currentApiQuestion) {
+  if (!currentApiQuestion || !currentSessionQuestion) {
     setCoachMessage("先に問題を読み込むと、セッションを開始できます。");
     appendLog("session-warning", "question_not_loaded");
+    return;
+  }
+  if (sessionState.step !== "idle") {
+    appendLog("session-warning", {
+      message: "session_already_started",
+      currentStep: sessionState.step,
+    });
     return;
   }
   sessionState.step = "time_check";
@@ -350,25 +391,44 @@ function startSession() {
 function handleTimeChoice(time) {
   sessionState.availableTime = time;
   sessionState.plan = buildSessionPlanText();
-  sessionState.step = "branch_question";
+  sessionState.step = currentSessionQuestion.isBranchModeSupported ? "branch_question" : "whole_question";
   appendLog("session-time-selected", sessionState);
   renderSession();
 }
 
 function handleNextSession() {
+  const previousStep = sessionState.step;
+  const previousBranchIndex = sessionState.branchIndex;
+  const totalBranchCount = currentSessionQuestion?.branches?.length || 0;
+
   if (sessionState.step === "branch_feedback") {
-    if (sessionState.branchIndex >= 3) {
+    if (sessionState.branchIndex >= totalBranchCount - 1) {
       sessionState.step = "whole_question";
     } else {
       sessionState.branchIndex += 1;
       sessionState.step = "branch_question";
     }
   }
-  appendLog("session-next", sessionState);
+  appendLog("session-next", {
+    previousStep,
+    currentBranchIndex: previousBranchIndex,
+    totalBranchCount,
+    nextStep: sessionState.step,
+    nextBranchIndex: sessionState.branchIndex,
+  });
   renderSession();
 }
 
 function handleBranchAnswer(answer) {
+  if (sessionState.step !== "branch_question") {
+    appendLog("session-warning", {
+      message: "branch_answer_ignored_outside_branch_question",
+      currentStep: sessionState.step,
+      attemptedAnswer: answer,
+    });
+    return;
+  }
+
   sessionState.branchAnswers.push({
     index: sessionState.branchIndex,
     answer,
@@ -407,22 +467,15 @@ function getQuestionModeForBranchReview() {
 }
 
 function evaluateBranchAnswer(latest) {
-  const correctOptionIndex = derivedState.correctOptionIndex;
-  if (!latest || !correctOptionIndex) {
+  const branchTruth = currentSessionQuestion?.branches?.[latest?.index]?.truth ?? null;
+  if (!latest || branchTruth === null) {
     return {
       isKnown: false,
       isCorrect: false,
       actualTruthLabel: "",
-      reason: "",
+      reason: "この問題は1肢ずつの正誤判定に未対応です。本問形式で確認します。",
     };
   }
-
-  const questionMode = getQuestionModeForBranchReview();
-  const selectedOptionTruth = getSelectedOptionTruth({
-    questionMode,
-    selectedOptionIndex: latest.index + 1,
-    correctOptionIndex,
-  });
 
   let learnerBelief = "unknown";
   if (latest.answer === "correct") learnerBelief = "thought_true";
@@ -431,22 +484,108 @@ function evaluateBranchAnswer(latest) {
   let isCorrect = false;
   if (latest.answer === "unknown") {
     isCorrect = false;
-  } else if (learnerBelief === "thought_true" && selectedOptionTruth === true) {
+  } else if (learnerBelief === "thought_true" && branchTruth === true) {
     isCorrect = true;
-  } else if (learnerBelief === "thought_false" && selectedOptionTruth === false) {
+  } else if (learnerBelief === "thought_false" && branchTruth === false) {
     isCorrect = true;
   }
 
   return {
     isKnown: true,
     isCorrect,
-    actualTruthLabel: selectedOptionTruth ? "正しい記述" : "誤りの記述",
+    actualTruthLabel: branchTruth ? "正しい記述" : "誤りの記述",
     reason:
       latest.answer === "unknown"
         ? "今回は「わからない」で保留しています。"
-        : selectedOptionTruth
+        : branchTruth
           ? "この肢は客観的には正しい記述です。"
           : "この肢は客観的には誤りの記述です。",
+  };
+}
+
+function detectBranchModeFromStem(stem) {
+  const normalized = normalizeStemForDetection(stem);
+  let mode = "unsupported";
+
+  if (normalized.includes("いくつあるか") || normalized.includes("組合せ") || normalized.includes("組み合わせ")) {
+    mode = "unsupported";
+  } else if (normalized.includes("正しいものはどれか") || normalized.includes("適切なものはどれか")) {
+    mode = "pick_true";
+  } else if (
+    normalized.includes("誤っているものはどれか") ||
+    normalized.includes("不適切なものはどれか") ||
+    normalized.includes("不適切")
+  ) {
+    mode = "pick_false";
+  }
+
+  appendLog("branch-mode-detection", {
+    originalStem: String(stem || ""),
+    normalizedStem: normalized,
+    detectedMode: mode,
+  });
+
+  return mode;
+}
+
+function normalizeStemForDetection(stem) {
+  return String(stem || "")
+    .replace(/\u3000/g, " ")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function buildBranchesFromQuestion(question, mode, correctOptionIndex) {
+  const choices = Array.isArray(question?.choices) ? question.choices : [];
+
+  return choices.slice(0, 4).map((text, index) => {
+    let truth = null;
+
+    if (mode === "pick_true" && correctOptionIndex !== null) {
+      truth = index + 1 === correctOptionIndex;
+    } else if (mode === "pick_false" && correctOptionIndex !== null) {
+      truth = index + 1 !== correctOptionIndex;
+    }
+
+    return {
+      index,
+      text,
+      truth,
+    };
+  });
+}
+
+function normalizeQuestionForSession(question) {
+  const stem = String(question?.stem || "");
+  const detectedMode = detectBranchModeFromStem(stem);
+  const correctOptionIndex = getCorrectOptionIndexFromQuestion(question);
+  const isBranchModeSupported = detectedMode !== "unsupported" && correctOptionIndex !== null;
+  const unsupportedReason =
+    detectedMode === "unsupported"
+      ? "この問題形式は、正答肢番号だけでは各肢の真偽を安全に再構成できません。"
+      : correctOptionIndex === null
+        ? "正答肢番号が取得できないため、各肢の真偽を判定できません。"
+        : null;
+
+  const mode = isBranchModeSupported ? detectedMode : "unsupported";
+  const branches = buildBranchesFromQuestion(question, mode, correctOptionIndex);
+
+  while (branches.length < 4) {
+    branches.push({
+      index: branches.length,
+      text: "",
+      truth: null,
+    });
+  }
+
+  return {
+    questionId: question?.id ?? null,
+    stem,
+    mode,
+    branches,
+    correctOptionIndex,
+    isBranchModeSupported,
+    unsupportedReason,
   };
 }
 
@@ -488,9 +627,29 @@ function handleReflectionSubmit(event) {
 }
 
 function handleWholeAnswer(choice) {
+  if (sessionState.step !== "whole_question") {
+    appendLog("session-warning", {
+      message: "whole_answer_ignored_outside_whole_question",
+      currentStep: sessionState.step,
+      attemptedChoice: Number(choice),
+    });
+    return;
+  }
+  if (sessionState.wholeSubmitting) {
+    appendLog("session-warning", {
+      message: "whole_answer_ignored_while_submitting",
+      currentStep: sessionState.step,
+      attemptedChoice: Number(choice),
+    });
+    return;
+  }
+
+  sessionState.wholeSubmitting = true;
+  sessionState.selectedWholeChoice = Number(choice);
   sessionState.wholeAnswer = Number(choice);
   derivedState.selectedOptionIndex = Number(choice);
   appendLog("session-whole-answer", { choice: sessionState.wholeAnswer });
+  renderSession();
   submitSelectedAnswerToApi();
 }
 

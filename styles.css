@@ -130,6 +130,19 @@ h3 {
   cursor: pointer;
 }
 
+.secondary-button[data-selected="true"] {
+  border-color: rgba(184, 92, 56, 0.9);
+  background: rgba(184, 92, 56, 0.16);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.secondary-button:disabled,
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
