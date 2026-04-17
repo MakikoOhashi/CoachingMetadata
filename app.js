@@ -867,12 +867,17 @@ async function handleReflectionSubmit(event) {
           : getLearnerBeliefAboutBranchAnswer(latest.answer) === "thought_false"
             ? "incorrect"
             : undefined,
+      reviewContext: "branch_review",
       questionMode,
     });
     latest.coachMessage = payload.coachMessage || "着眼点を記録しました。";
+    latest.misunderstandingType = payload.misunderstandingType || "";
+    latest.focusPhrase = payload.focusPhrase || "";
     appendLog("session-branch-coach-reply", {
       index: latest.index,
       coachMessage: latest.coachMessage,
+      misunderstandingType: latest.misunderstandingType,
+      focusPhrase: latest.focusPhrase,
     });
   } catch (error) {
     latest.coachMessage = error instanceof Error ? error.message : "コーチ返答の取得に失敗しました。";
