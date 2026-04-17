@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Metadata-Driven AI Coach</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page split-layout">
+      <section class="coach-pane">
+        <div class="hero">
+          <p class="eyebrow">Metadata-Driven AI Coach</p>
+          <h1>管理業務主任者 セッション</h1>
+          <p class="hero-copy">1問ずつではなく、1肢ずつ理解を見ながら進めます。</p>
+        </div>
+
+        <section class="panel session-panel">
+          <div class="panel-heading">
+            <h2>Coaching Session</h2>
+            <p id="sessionStepLabel" class="inline-status">Step 0 / 5</p>
+          </div>
+
+          <div class="session-meta">
+            <p><span>今日のテーマ</span><strong id="sessionTopic">問題を読み込むと表示されます</strong></p>
+            <p><span>進行モード</span><strong id="sessionModeBadge">未開始</strong></p>
+          </div>
+
+          <div class="coach-bubble">
+            <p id="coachMessage">まずは問題を読み込みます。読み込めたら、時間を決めて1肢ずつ進めましょう。</p>
+          </div>
+
+          <div id="sessionCard" class="session-card">
+            <p id="sessionPromptLabel" class="card-label">Session</p>
+            <h3 id="sessionPromptTitle">準備中</h3>
+            <p id="sessionPromptBody" class="result-text subtle">
+              下の接続欄で common-ai-api から問題を読み込むと、ここにセッション本体が出ます。
+            </p>
+          </div>
+
+          <div id="timeChoiceRow" class="button-row" hidden>
+            <button class="secondary-button time-choice-button" type="button" data-time="short">10-15分</button>
+            <button class="secondary-button time-choice-button" type="button" data-time="normal">20-30分</button>
+            <button class="secondary-button time-choice-button" type="button" data-time="long">40分以上</button>
+          </div>
+
+          <div id="branchActionRow" class="button-row" hidden>
+            <button class="primary-button branch-answer-button" type="button" data-answer="correct">○ 正しい</button>
+            <button class="primary-button branch-answer-button" type="button" data-answer="incorrect">× 誤り</button>
+            <button class="secondary-button branch-answer-button" type="button" data-answer="unknown">? わからない</button>
+          </div>
+
+          <div id="wholeActionRow" class="button-row" hidden>
+            <button class="secondary-button whole-answer-button" type="button" data-choice="1">1</button>
+            <button class="secondary-button whole-answer-button" type="button" data-choice="2">2</button>
+            <button class="secondary-button whole-answer-button" type="button" data-choice="3">3</button>
+            <button class="secondary-button whole-answer-button" type="button" data-choice="4">4</button>
+          </div>
+
+          <form id="reflectionForm" class="reflection-form" hidden>
+            <label id="reflectionLabel" class="reflection-label" for="reflectionInput">短く整理してください</label>
+            <input id="reflectionInput" class="reflection-input" type="text" autocomplete="off" />
+            <button class="primary-button" type="submit">送信</button>
+          </form>
+
+          <div class="button-row">
+            <button id="loadStateButton" class="secondary-button" type="button">学習状態を読む</button>
+            <button id="loadQuestionButton" class="primary-button" type="button">過去問を読む</button>
+            <button id="startSessionButton" class="primary-button" type="button">セッション開始</button>
+            <button id="nextSessionButton" class="secondary-button" type="button" hidden>次へ進む</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="log-pane panel">
+        <div class="panel-heading">
+          <h2>Log Data</h2>
+          <button id="clearLogButton" class="secondary-button" type="button">ログを消す</button>
+        </div>
+        <pre id="logOutput" class="log-output"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
