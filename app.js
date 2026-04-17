@@ -14,6 +14,7 @@ const elements = {
   reflectionForm: document.getElementById("reflectionForm"),
   reflectionLabel: document.getElementById("reflectionLabel"),
   reflectionInput: document.getElementById("reflectionInput"),
+  reflectionReply: document.getElementById("reflectionReply"),
   startSessionButton: document.getElementById("startSessionButton"),
   nextSessionButton: document.getElementById("nextSessionButton"),
 };
@@ -233,6 +234,7 @@ function renderSession(resultPayload = null) {
   toggleElement("wholeActionRow", true);
   toggleElement("nextSessionButton", true);
   toggleElement("reflectionForm", true);
+  toggleElement("reflectionReply", true);
   elements.startSessionButton.disabled = !currentApiQuestion || sessionState.step !== "idle";
   elements.nextSessionButton.textContent =
     sessionState.step === "branch_feedback" && sessionState.branchIndex >= currentSessionQuestion?.branches.length - 1
@@ -317,12 +319,14 @@ function renderSession(resultPayload = null) {
         branchTruth.reason ? branchTruth.reason : "",
       ].join("\n"),
     );
-    elements.reflectionLabel.textContent = buildReflectionPrompt(latest.answer);
+    elements.reflectionLabel.textContent = buildReflectionPrompt(latest, branchTruth);
     elements.reflectionInput.placeholder = buildReflectionPlaceholder(latest.answer);
     elements.reflectionInput.value = latest.reflection || "";
     toggleElement("reflectionForm", false);
-    if (latest.reflection) {
-      setCoachMessage(branchTruth.isKnown ? "整理できました。次の肢へ進みます。" : "整理を記録しました。次の肢へ進みます。");
+    if (latest.coachMessage) {
+      elements.reflectionReply.textContent = buildDisplayedCoachReply(latest, branchTruth);
+      toggleElement("reflectionReply", false);
+      setCoachMessage("着眼点を確認しました。次の肢へ進みます。");
       toggleElement("nextSessionButton", false);
     }
     return;
@@ -433,6 +437,7 @@ function handleBranchAnswer(answer) {
     index: sessionState.branchIndex,
     answer,
     reflection: "",
+    coachMessage: "",
   });
   sessionState.step = "branch_feedback";
   appendLog("session-branch-answer", sessionState.branchAnswers[sessionState.branchAnswers.length - 1]);
@@ -589,7 +594,23 @@ function normalizeQuestionForSession(question) {
   };
 }
 
-function buildReflectionPrompt(answer) {
+function buildReflectionPrompt(latest, branchTruth) {
+  if (!latest || !branchTruth.isKnown) {
+    return buildReflectionPromptFallback(latest?.answer);
+  }
+
+  const followup = getFollowup({
+    questionMode: currentSessionQuestion.mode === "unsupported" ? inferQuestionMode(currentSessionQuestion.stem) : currentSessionQuestion.mode,
+    selectedOptionTruth: currentSessionQuestion.branches[latest.index]?.truth,
+    learnerBeliefAboutSelected: getLearnerBeliefAboutBranchAnswer(latest.answer),
+    selectedOptionIndex: latest.index + 1,
+    correctOptionIndex: currentSessionQuestion.correctOptionIndex || 1,
+  });
+
+  return followup.step1 || buildReflectionPromptFallback(latest.answer);
+}
+
+function buildReflectionPromptFallback(answer) {
   if (answer === "correct") {
     return "そのように見た理由を一言で整理してください";
   }
@@ -609,7 +630,183 @@ function buildReflectionPlaceholder(answer) {
   return "例: 要件と例外の区別で迷っています";
 }
 
-function handleReflectionSubmit(event) {
+function buildDisplayedCoachReply(latest, branchTruth) {
+  const coachMessage = normalizeCoachReply(latest?.coachMessage);
+  if (coachMessage) {
+    return coachMessage;
+  }
+  return buildCoachReplySummary(latest, branchTruth);
+}
+
+function normalizeCoachReply(text) {
+  const normalized = String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return normalized || "";
+}
+
+function buildCoachReplySummary(latest, branchTruth) {
+  const branchText = currentSessionQuestion?.branches?.[latest?.index]?.text || "";
+  const focus = pickLearnerMisunderstandingPoint(latest?.reflection, branchText);
+
+  if (!branchTruth?.isKnown) {
+    return "この肢はまだ自動判定できないため、本問全体で確認します。";
+  }
+
+  if (branchTruth.isCorrect) {
+    return buildCorrectBranchExplanation(focus, branchTruth, branchText);
+  }
+
+  return buildIncorrectBranchExplanation(focus, branchTruth, branchText);
+}
+
+function buildCorrectBranchExplanation(focus, branchTruth, branchText) {
+  const explanation = explainPhraseForLearning(focus, branchText, branchTruth);
+
+  if (explanation) {
+    return [
+      `「${focus}」の見方で大丈夫です。`,
+      explanation.why,
+      explanation.correct,
+    ].join("\n");
+  }
+
+  return [
+    `「${focus}」の捉え方で合っています。`,
+    `この肢は${branchTruth.actualTruthLabel}です。`,
+    "この理解を次の肢でもそのまま使えます。",
+  ].join("\n");
+}
+
+function buildIncorrectBranchExplanation(focus, branchTruth, branchText) {
+  const explanation = explainPhraseForLearning(focus, branchText, branchTruth);
+
+  if (explanation) {
+    return [
+      `「${focus}」の理解がずれています。`,
+      explanation.why,
+      explanation.correct,
+    ].join("\n");
+  }
+
+  return [
+    `「${focus}」の読み取りを修正しましょう。`,
+    `この肢は${branchTruth.actualTruthLabel}なので、その断定は置けません。`,
+    "要件や例外まで含めて読める形に直すのがポイントです。",
+  ].join("\n");
+}
+
+function pickLearnerMisunderstandingPoint(reflection, branchText) {
+  const normalizedReflection = String(reflection || "").replace(/\s+/g, " ").trim();
+
+  if (normalizedReflection && !isGenericReflection(normalizedReflection)) {
+    return normalizedReflection;
+  }
+
+  return pickFocusPhrase(branchText);
+}
+
+function isGenericReflection(text) {
+  return /^(わからない|不明|迷った|なんとなく|多分|たぶん|ここ|これ|その辺)$/u.test(String(text || "").trim());
+}
+
+function explainPhraseForLearning(focus, branchText, branchTruth) {
+  const normalizedText = String(branchText || "").replace(/\s+/g, " ").trim();
+  const normalizedFocus = String(focus || "").replace(/\s+/g, " ").trim();
+  const actualTruth = branchTruth?.actualTruthLabel || "";
+
+  if (/取り消すことができない/.test(normalizedFocus)) {
+    return {
+      why: "未成年者の相続放棄は、制限行為能力を理由に取り消し得る場面があります。",
+      correct: "したがって、一律に取消不可とは言えません。",
+    };
+  }
+
+  if (/代襲/.test(normalizedText) || /代襲する/.test(normalizedFocus)) {
+    return {
+      why: "相続放棄は初めから相続人でなかったものとして扱われるため、放棄を原因とする代襲相続は生じません。",
+      correct: "したがって、Bが放棄してもCがBを代襲するとは言えません。",
+    };
+  }
+
+  if (/しなければならない/.test(normalizedFocus)) {
+    return {
+      why: actualTruth === "正しい記述"
+        ? "熟慮期間を定める条文どおりの言い方で、起算点も「相続の開始があった時から3箇月以内」です。"
+        : "期限や義務を断定する表現は、起算点や例外まで条文どおりかを確認しないとずれやすいです。",
+      correct: actualTruth === "正しい記述"
+        ? "このように、期間と起算点をセットで押さえる理解で大丈夫です。"
+        : "期間を問う肢は、誰がいつから数えるのかまで含めて読み直すのが正しい理解です。",
+    };
+  }
+
+  if (/のみ/.test(normalizedFocus)) {
+    return {
+      why: actualTruth === "正しい記述"
+        ? "限定承認は共同相続人全員が共同して行う必要があり、「のみ」が条文の要件に合っています。"
+        : "「のみ」のような限定表現は、条文に本当にその条件が書かれているかを確認しないと誤りになります。",
+      correct: actualTruth === "正しい記述"
+        ? "このように、全員共同という要件まで含めて覚えるのが正しい理解です。"
+        : "限定条件を見たら、条文上の要件と一致しているかを照合するのが正しい読み方です。",
+    };
+  }
+
+  if (/できない|必ず|当然に|すべて/.test(normalizedFocus)) {
+    return {
+      why: "民法の肢では、この種の強い断定は例外や要件の抜け漏れがあると誤りになりやすいです。",
+      correct: "断定表現を見たら、その結論が常に成り立つのかを条文ベースで確認するのが正しい理解です。",
+    };
+  }
+
+  if (!normalizedFocus) {
+    return null;
+  }
+
+  return {
+    why: actualTruth === "正しい記述"
+      ? `「${normalizedFocus}」という見方は、条文の要件とずれていません。`
+      : `「${normalizedFocus}」という見方は、要件か例外の読み方がずれています。`,
+    correct: actualTruth === "正しい記述"
+      ? "要件と結論がそのままつながっている読み方で大丈夫です。"
+      : "要件と例外を分けて読むと、どこが誤りかを再利用しやすくなります。",
+  };
+}
+
+function pickFocusPhrase(text) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  const emphasisPatterns = [
+    /[^。]*できない/,
+    /[^。]*しなければならない/,
+    /[^。]*のみ/,
+    /[^。]*当然に/,
+    /[^。]*必ず/,
+    /[^。]*すべて/,
+  ];
+
+  for (const pattern of emphasisPatterns) {
+    const match = normalized.match(pattern);
+    if (match?.[0]) {
+      return match[0].trim();
+    }
+  }
+
+  return normalized.slice(0, 24) || "この表現";
+}
+
+function getLearnerBeliefAboutBranchAnswer(answer) {
+  if (answer === "correct") return "thought_true";
+  if (answer === "incorrect") return "thought_false";
+  return "unknown";
+}
+
+async function requestReflection(payload) {
+  return postApi("/coaching/company-reflection-coach", payload);
+}
+
+async function handleReflectionSubmit(event) {
   event.preventDefault();
   if (sessionState.step !== "branch_feedback") return;
 
@@ -617,12 +814,76 @@ function handleReflectionSubmit(event) {
   const reflection = elements.reflectionInput.value.trim();
   if (!latest || !reflection) return;
 
+  const branchTruth = evaluateBranchAnswer(latest);
   latest.reflection = reflection;
   appendLog("session-branch-reflection", {
     index: latest.index,
     answer: latest.answer,
     reflection,
   });
+  const submitButton = elements.reflectionForm.querySelector("button");
+  elements.reflectionInput.disabled = true;
+  if (submitButton) submitButton.disabled = true;
+  setCoachMessage("コーチが今の整理を確認しています。");
+
+  try {
+    const questionMode = currentSessionQuestion.mode === "unsupported" ? inferQuestionMode(currentSessionQuestion.stem) : currentSessionQuestion.mode;
+    const learnerFocus = pickLearnerMisunderstandingPoint(reflection, currentSessionQuestion.branches[latest.index]?.text || "");
+    const reviewChoiceNumber = latest.index + 1;
+    const reviewChoiceText = currentSessionQuestion.branches[latest.index]?.text || "";
+    const correctChoiceNumber = currentSessionQuestion.correctOptionIndex || undefined;
+    const correctChoiceText =
+      currentSessionQuestion.correctOptionIndex
+        ? currentSessionQuestion.branches[currentSessionQuestion.correctOptionIndex - 1]?.text || ""
+        : "";
+    const explanationText =
+      [
+        correctChoiceNumber && correctChoiceText
+          ? `正解は ${correctChoiceNumber}. ${correctChoiceText} です。`
+          : "",
+        reviewChoiceText
+          ? `今回確認しているのは ${reviewChoiceNumber}. ${reviewChoiceText} です。`
+          : "",
+        learnerFocus ? `学習者が気にしている点は「${learnerFocus}」です。` : "",
+        "各肢の正誤を整理しながら確認してください。",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    const payload = await requestReflection({
+      questionText: currentSessionQuestion.stem,
+      explanationText,
+      learnerReflection: reflection,
+      coachTurn: 1,
+      mode: latest.answer === "correct" ? "correct_check" : "mistake_review",
+      reviewChoiceNumber,
+      reviewChoiceText,
+      correctChoiceNumber,
+      correctChoiceText,
+      reviewStep: "selected_choice",
+      reviewTargetTruth: branchTruth.isKnown ? (currentSessionQuestion.branches[latest.index]?.truth ? "correct" : "incorrect") : undefined,
+      learnerJudgment:
+        getLearnerBeliefAboutBranchAnswer(latest.answer) === "thought_true"
+          ? "correct"
+          : getLearnerBeliefAboutBranchAnswer(latest.answer) === "thought_false"
+            ? "incorrect"
+            : undefined,
+      questionMode,
+    });
+    latest.coachMessage = payload.coachMessage || "着眼点を記録しました。";
+    appendLog("session-branch-coach-reply", {
+      index: latest.index,
+      coachMessage: latest.coachMessage,
+    });
+  } catch (error) {
+    latest.coachMessage = error instanceof Error ? error.message : "コーチ返答の取得に失敗しました。";
+    appendLog("session-branch-coach-reply-error", {
+      index: latest.index,
+      error: latest.coachMessage,
+    });
+  } finally {
+    elements.reflectionInput.disabled = false;
+    if (submitButton) submitButton.disabled = false;
+  }
   renderSession();
 }
 

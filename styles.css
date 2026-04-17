@@ -173,6 +173,16 @@ h3 {
   font: inherit;
 }
 
+.reflection-reply {
+  margin-top: 14px;
+  border-radius: 18px;
+  background: rgba(184, 92, 56, 0.1);
+  color: var(--text);
+  padding: 14px 16px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
 .session-meta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
