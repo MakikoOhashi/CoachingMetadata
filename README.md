@@ -65,6 +65,39 @@ The coach continuously decides what the learner needs next.
 
 ---
 
+# OpenMetadata Focus
+
+For the hackathon, we are making one deliberate scope decision:
+
+OpenMetadata is used as a **trust / reliability layer**, not as the primary application database.
+
+- Supabase keeps product data, learner logs, and session state
+- OpenMetadata is used to make AI coaching feedback traceable
+- The demo focuses on one deep OpenMetadata use-case rather than broad platform coverage
+
+Our chosen OpenMetadata feature is:
+
+## Runtime / Execution Lineage
+
+For each coaching response, we want to show:
+
+Question  
+↓  
+Learner Judgment  
+↓  
+Learner Reflection  
+↓  
+Focus Phrase  
+↓  
+Misunderstanding Type  
+↓  
+Coach Feedback
+
+This is not static ETL lineage.
+This is runtime reasoning lineage for one real learner interaction.
+
+---
+
 # Core Experience
 
 ## Single Session Interface
@@ -176,19 +209,23 @@ Examples:
 
 Every learning interaction becomes explainable data.
 
-We use OpenMetadata to organize and visualize:
+In this hackathon version, OpenMetadata is used to represent and visualize:
 
-- Questions
-- Topics
-- Learner State
-- Question Exposures
-- Hypotheses
-- Diagnostic Results
-- Interventions
-- Progress History
+- runtime lineage of each coaching response
+- what learner signals were used
+- what intermediate judgment was made
+- why a specific feedback message was returned
+
+This improves:
+
+- trust
+- explainability
+- debugging
+- iteration quality
+- reviewer confidence
 
 The interface stays simple.  
-The intelligence lives underneath.
+The intelligence remains inspectable underneath.
 
 ---
 
@@ -201,7 +238,7 @@ The intelligence lives underneath.
 - Minimal friction
 
 ## Backend
-- Existing Supabase assets reused
+- Supabase for questions, learner logs, and session state
 - Session state persistence
 - Learner progress storage
 
@@ -211,7 +248,7 @@ The intelligence lives underneath.
 - Pass likelihood estimation
 
 ## Metadata Layer
-- OpenMetadata for explainability and relationships
+- OpenMetadata for runtime feedback lineage and traceability
 
 ---
 
@@ -230,7 +267,7 @@ The intelligence lives underneath.
 - Choose best intervention
 - Update learner state
 - Show simple pass likelihood
-- Visualize metadata in OpenMetadata
+- Visualize one coaching response as runtime lineage in OpenMetadata
 
 ## Not Included
 
@@ -255,6 +292,33 @@ The intelligence lives underneath.
 9. Coach selects intervention  
 10. Progress summary  
 11. Updated pass likelihood shown
+12. Reviewer inspects runtime lineage in OpenMetadata
+
+---
+
+# Practical Data Split
+
+## Supabase
+
+Stores:
+
+- questions
+- learner answers
+- reflections
+- misunderstandingType
+- focusPhrase
+- feedback logs
+- timestamps
+
+## OpenMetadata
+
+Represents:
+
+- runtime lineage of each coaching response
+- signal relationships between learner input and AI output
+- traceability for review and debugging
+
+This framing keeps the application practical while making adaptive AI behavior inspectable.
 
 ---
 
