@@ -73,6 +73,7 @@ OpenMetadata is used as a **trust / reliability layer**, not as the primary appl
 
 - Supabase keeps product data, learner logs, and session state
 - OpenMetadata is used to make AI coaching feedback traceable
+- OpenMetadata also defines coaching routes that guide how the AI responds
 - The demo focuses on one deep OpenMetadata use-case rather than broad platform coverage
 
 Our chosen OpenMetadata feature is:
@@ -95,6 +96,23 @@ Coach Feedback
 
 This is not static ETL lineage.
 This is runtime reasoning lineage for one real learner interaction.
+
+## Route-Based Metadata
+
+OpenMetadata is not only used to visualize reasoning after the fact.
+It also helps define coaching routes before the response is generated.
+
+In practice:
+
+1. Human-defined coaching routes are stored as metadata  
+2. AI selects the best route based on learner state and session signals  
+3. The selected route guides what signals to inspect and how to respond  
+4. The executed route and resulting feedback remain visible to humans
+
+This means metadata improves both:
+
+- AI decision quality
+- human trust and explainability
 
 ---
 
@@ -212,6 +230,8 @@ Every learning interaction becomes explainable data.
 In this hackathon version, OpenMetadata is used to represent and visualize:
 
 - runtime lineage of each coaching response
+- route definitions that help structure response strategy
+- which route was selected for a given learner interaction
 - what learner signals were used
 - what intermediate judgment was made
 - why a specific feedback message was returned
@@ -248,7 +268,7 @@ The intelligence remains inspectable underneath.
 - Pass likelihood estimation
 
 ## Metadata Layer
-- OpenMetadata for runtime feedback lineage and traceability
+- OpenMetadata for route-based response guidance, runtime feedback lineage, and traceability
 
 ---
 
@@ -314,6 +334,7 @@ Stores:
 
 Represents:
 
+- coaching routes that shape AI response strategy
 - runtime lineage of each coaching response
 - signal relationships between learner input and AI output
 - traceability for review and debugging
@@ -340,3 +361,23 @@ Intelligent underneath.
 
 We don’t just show questions.  
 We build a coach.
+
+
+
+---
+# Project Closure Note
+
+## What I Tried to Build
+I explored a metadata layer for Coaching Company that could strengthen AI coaching responses by organizing problem knowledge, learner signals, misconceptions, and intervention context.
+
+## Why I Tried OpenMetadata
+I wanted to deepen my understanding of metadata systems and test whether a dedicated metadata platform could improve the Coaching Company product in a meaningful way.
+
+## What I Learned
+I gained hands-on experience with Docker-based local infrastructure, connecting external systems to Supabase, and understanding how metadata platforms manage relationships, lineage, governance, and shared data context.
+
+## Why I Pivoted
+OpenMetadata is optimized for multi-team, multi-source, enterprise-scale data environments. My current product stage is a fast-moving, single-product system where agility and direct learner value matter more than heavyweight governance layers.
+
+## Where the Value Moves Next
+The useful ideas from this exploration will be integrated into Coaching Company Next through simpler architecture such as Supabase + JSONB, adaptive memory, learner history, misconception tracking, and stronger AI coaching context.
